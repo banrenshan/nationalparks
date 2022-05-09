@@ -34,20 +34,6 @@
       "required": true
     },
     {
-      "description": "Git source URI for application",
-      "displayName": "Git source repository",
-      "name": "GIT_URI",
-      "value": "https://github.com/openshift-roadshow/nationalparks.git",
-      "required": true
-    },
-    {
-      "description": "Git branch/tag reference",
-      "displayName": "Git branch/tag reference",
-      "name": "GIT_REF",
-      "value": "master",
-      "required": true
-    },
-    {
       "description": "Maven mirror url. If nexus is deployed locally, use nexus url (e.g. http://nexus.ci:8081/content/groups/public/)",
       "displayName": "Maven mirror url",
       "name": "MAVEN_MIRROR_URL",
@@ -108,6 +94,24 @@
       "from": "[a-zA-Z0-9]{8}",
       "generate": "expression",
       "required": true
+    },
+    {
+      "description": "Namespace where base imagestreams are located",
+      "displayName": "Base Namespace",
+      "name": "BASE_NAMESPACE",
+      "required": true
+    },
+    {
+      "description": "The name for the frontend application.",
+      "displayName": "Parksmap Application Name",
+      "name": "WEB_APPLICATION_NAME",
+      "value": "parksmap",
+      "required": true
+    },
+    {
+      "description": "Custom hostname for frontend application.  Leave blank for default hostname, e.g.: <application-name>.<project>.<default-domain-suffix>",
+      "displayName": "Frontend Application Route",
+      "name": "WEB_APPLICATION_HOSTNAME"
     }
   ],
   "objects": [
@@ -314,9 +318,9 @@
       "kind": "BuildConfig",
       "apiVersion": "v1",
       "metadata": {
-        "name": "${APPLICATION_NAME}",
+        "name": "${APPLICATION_NAME}-docker",
         "labels": {
-          "build": "${APPLICATION_NAME}"
+          "build": "${APPLICATION_NAME}-docker"
         }
       },
       "spec": {
@@ -332,40 +336,20 @@
             "generic": {
               "secret": "${GENERIC_TRIGGER_SECRET}"
             }
-          },
-          {
-            "type": "ConfigChange"
-          },
-          {
-            "type": "ImageChange"
           }
         ],
         "runPolicy": "Serial",
         "source": {
-          "type": "Git",
-          "git": {
-            "uri": "${GIT_URI}",
-            "ref": "${GIT_REF}"
-          }
+          "type": "Binary",
+          "binary": { }
         },
         "strategy": {
-          "type": "Source",
-          "sourceStrategy": {
+          "type": "Docker",
+          "dockerStrategy": {
             "from": {
               "kind": "ImageStreamTag",
               "name": "s2i-java:latest"
-            },
-            "env": [
-              {
-                "name": "MAVEN_ARGS",
-                "value": "clean install spring-boot:repackage -DskipTests -Dcom.redhat.xpaas.repo.redhatga"
-              },
-              {
-                "name": "MAVEN_MIRROR_URL",
-                "value": "${MAVEN_MIRROR_URL}"
-              }
-            ],
-            "incremental": false
+            }
           }
         },
         "output": {
@@ -417,7 +401,7 @@
           {
             "type": "ImageChange",
             "imageChangeParams": {
-              "automatic": true,
+              "automatic": false,
               "containerNames": [
                 "${APPLICATION_NAME}"
               ],
@@ -508,7 +492,8 @@
             "restartPolicy": "Always",
             "terminationGracePeriodSeconds": 30,
             "dnsPolicy": "ClusterFirst",
-            "securityContext": {}
+            "securityContext": {},
+            "serviceAccountName": "jenkins"
           }
         }
       }
@@ -548,8 +533,7 @@
       "metadata": {
         "name": "${APPLICATION_NAME}",
         "labels": {
-          "component": "${APPLICATION_NAME}",
-          "type": "parksmap-backend"
+          "component": "${APPLICATION_NAME}"
         }
       },
       "spec": {
@@ -557,6 +541,162 @@
         "to": {
           "kind": "Service",
           "name": "${APPLICATION_NAME}",
+          "weight": 100
+        },
+        "port": {
+          "targetPort": "8080-tcp"
+        }
+      }
+    },
+    {
+      "kind": "DeploymentConfig",
+      "apiVersion": "v1",
+      "metadata": {
+        "name": "${WEB_APPLICATION_NAME}",
+        "labels": {
+          "component": "${WEB_APPLICATION_NAME}"
+        }
+      },
+      "spec": {
+        "strategy": {
+          "type": "Rolling",
+          "rollingParams": {
+            "updatePeriodSeconds": 1,
+            "intervalSeconds": 1,
+            "timeoutSeconds": 600,
+            "maxUnavailable": "25%",
+            "maxSurge": "25%"
+          },
+          "resources": {}
+        },
+        "triggers": [
+          {
+            "type": "ConfigChange"
+          },
+          {
+            "type": "ImageChange",
+            "imageChangeParams": {
+              "automatic": true,
+              "containerNames": [
+                "${WEB_APPLICATION_NAME}"
+              ],
+              "from": {
+                "kind": "ImageStreamTag",
+                "name": "${WEB_APPLICATION_NAME}:latest",
+                "namespace": "${BASE_NAMESPACE}"
+              }
+            }
+          }
+        ],
+        "replicas": 1,
+        "test": false,
+        "selector": {
+          "component": "${WEB_APPLICATION_NAME}"
+        },
+        "template": {
+          "metadata": {
+            "labels": {
+              "component": "${WEB_APPLICATION_NAME}"
+            }
+          },
+          "spec": {
+            "containers": [
+              {
+                "name": "${WEB_APPLICATION_NAME}",
+                "image": " ",
+                "ports": [
+                  {
+                    "containerPort": 8080,
+                    "protocol": "TCP"
+                  }
+                ],
+                "env": [
+                  {
+                    "name": "KUBERNETES_NAMESPACE",
+                    "valueFrom": {
+                      "fieldRef": {
+                        "fieldPath": "metadata.namespace"
+                      }
+                    }
+                  }
+                ],
+                "resources": {},
+                "livenessProbe": {
+                  "httpGet": {
+                    "path": "/ws/healthz/",
+                    "port": 8080,
+                    "scheme": "HTTP"
+                  },
+                  "initialDelaySeconds": 120,
+                  "timeoutSeconds": 1,
+                  "periodSeconds": 10,
+                  "successThreshold": 1,
+                  "failureThreshold": 3
+                },
+                "readinessProbe": {
+                  "httpGet": {
+                    "path": "/ws/healthz/",
+                    "port": 8080,
+                    "scheme": "HTTP"
+                  },
+                  "initialDelaySeconds": 20,
+                  "timeoutSeconds": 1,
+                  "periodSeconds": 10,
+                  "successThreshold": 1,
+                  "failureThreshold": 3
+                },
+                "terminationMessagePath": "/dev/termination-log",
+                "imagePullPolicy": "IfNotPresent"
+              }
+            ],
+            "restartPolicy": "Always",
+            "terminationGracePeriodSeconds": 30,
+            "dnsPolicy": "ClusterFirst",
+            "securityContext": {},
+            "serviceAccountName": "jenkins"
+          }
+        }
+      }
+    },
+    {
+      "kind": "Service",
+      "apiVersion": "v1",
+      "metadata": {
+        "name": "${WEB_APPLICATION_NAME}",
+        "labels": {
+          "component": "${WEB_APPLICATION_NAME}"
+        }
+      },
+      "spec": {
+        "ports": [
+          {
+            "name": "8080-tcp",
+            "protocol": "TCP",
+            "port": 8080,
+            "targetPort": 8080
+          }
+        ],
+        "selector": {
+          "component": "${WEB_APPLICATION_NAME}"
+        },
+        "type": "ClusterIP",
+        "sessionAffinity": "None"
+      }
+    },
+    {
+      "kind": "Route",
+      "apiVersion": "v1",
+      "metadata": {
+        "name": "${WEB_APPLICATION_NAME}",
+        "labels": {
+          "component": "${WEB_APPLICATION_NAME}"
+        }
+      },
+      "spec": {
+        "host": "${WEB_APPLICATION_HOSTNAME}",
+        "to": {
+          "kind": "Service",
+          "name": "${WEB_APPLICATION_NAME}",
           "weight": 100
         },
         "port": {

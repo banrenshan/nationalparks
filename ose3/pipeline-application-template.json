@@ -34,20 +34,6 @@
       "required": true
     },
     {
-      "description": "Git source URI for application",
-      "displayName": "Git source repository",
-      "name": "GIT_URI",
-      "value": "https://github.com/openshift-roadshow/nationalparks.git",
-      "required": true
-    },
-    {
-      "description": "Git branch/tag reference",
-      "displayName": "Git branch/tag reference",
-      "name": "GIT_REF",
-      "value": "master",
-      "required": true
-    },
-    {
       "description": "Maven mirror url. If nexus is deployed locally, use nexus url (e.g. http://nexus.ci:8081/content/groups/public/)",
       "displayName": "Maven mirror url",
       "name": "MAVEN_MIRROR_URL",
@@ -314,9 +300,9 @@
       "kind": "BuildConfig",
       "apiVersion": "v1",
       "metadata": {
-        "name": "${APPLICATION_NAME}",
+        "name": "${APPLICATION_NAME}-docker",
         "labels": {
-          "build": "${APPLICATION_NAME}"
+          "build": "${APPLICATION_NAME}-docker"
         }
       },
       "spec": {
@@ -332,40 +318,20 @@
             "generic": {
               "secret": "${GENERIC_TRIGGER_SECRET}"
             }
-          },
-          {
-            "type": "ConfigChange"
-          },
-          {
-            "type": "ImageChange"
           }
         ],
         "runPolicy": "Serial",
         "source": {
-          "type": "Git",
-          "git": {
-            "uri": "${GIT_URI}",
-            "ref": "${GIT_REF}"
-          }
+          "type": "Binary",
+          "binary": { }
         },
         "strategy": {
-          "type": "Source",
-          "sourceStrategy": {
+          "type": "Docker",
+          "dockerStrategy": {
             "from": {
               "kind": "ImageStreamTag",
               "name": "s2i-java:latest"
-            },
-            "env": [
-              {
-                "name": "MAVEN_ARGS",
-                "value": "clean install spring-boot:repackage -DskipTests -Dcom.redhat.xpaas.repo.redhatga"
-              },
-              {
-                "name": "MAVEN_MIRROR_URL",
-                "value": "${MAVEN_MIRROR_URL}"
-              }
-            ],
-            "incremental": false
+            }
           }
         },
         "output": {
@@ -417,7 +383,7 @@
           {
             "type": "ImageChange",
             "imageChangeParams": {
-              "automatic": true,
+              "automatic": false,
               "containerNames": [
                 "${APPLICATION_NAME}"
               ],
@@ -508,7 +474,8 @@
             "restartPolicy": "Always",
             "terminationGracePeriodSeconds": 30,
             "dnsPolicy": "ClusterFirst",
-            "securityContext": {}
+            "securityContext": {},
+            "serviceAccountName": "jenkins"
           }
         }
       }
@@ -548,8 +515,7 @@
       "metadata": {
         "name": "${APPLICATION_NAME}",
         "labels": {
-          "component": "${APPLICATION_NAME}",
-          "type": "parksmap-backend"
+          "component": "${APPLICATION_NAME}"
         }
       },
       "spec": {
